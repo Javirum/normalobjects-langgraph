@@ -11,8 +11,6 @@ logger = logging.getLogger("complaint_workflow")
 NODE_LABELS = {
     "intake": "Intake",
     "validation": "Validation",
-    "investigation": "Investigation",
-    "investigation_blocked": "Investigation (blocked)",
     "resolution": "Resolution",
     "resolution_blocked": "Resolution (blocked)",
     "closure": "Closure",
@@ -49,36 +47,66 @@ def visualize_workflow_path(state: ComplaintState) -> str:
 
     status_icon = STATUS_ICONS.get(state.get("status", ""), "[?]")
 
-    for i, step in enumerate(path):
-        label = NODE_LABELS.get(step, step)
-        prefix = "  --> " if i == 0 else "      |"
+    # Separate investigation steps (parallel) from sequential steps
+    investigation_steps = [s for s in path if s.startswith("investigation:")]
+    sequential_steps = [s for s in path if not s.startswith("investigation:")]
 
-        if i > 0:
-            lines.append("      |")
-            lines.append(f"      v")
-            prefix = "  --> "
+    # Build ordered display: sequential steps with investigation fork inserted
+    display_order: list[str] = []
+    investigation_inserted = False
+    for step in path:
+        if step.startswith("investigation:") and not investigation_inserted:
+            display_order.append("__investigations__")
+            investigation_inserted = True
+        elif not step.startswith("investigation:"):
+            display_order.append(step)
 
-        detail = ""
-        if step == "intake":
-            detail = f'  category="{state.get("category", "")}"'
-        elif step == "validation":
-            detail = f'  status={state.get("validation_status", "")}'
-        elif step == "investigation":
-            has_findings = bool(state.get("investigation_findings"))
-            detail = f"  findings={'yes' if has_findings else 'none'}"
-        elif step == "resolution":
-            detail = (
-                f'  effectiveness={state.get("effectiveness_rating", "")}'
-                f'  escalation={"yes" if state.get("requires_escalation") else "no"}'
+    step_idx = 0
+    for entry in display_order:
+        if entry == "__investigations__":
+            # Render parallel fork
+            if step_idx > 0:
+                lines.append("      |")
+                lines.append("      v")
+            categories = [s.split(":", 1)[1] for s in investigation_steps]
+            lines.append(f"  --> Investigation (parallel: {', '.join(categories)})")
+            findings = state.get("investigation_findings", {})
+            for cat in categories:
+                has = "yes" if cat in findings and findings[cat] else "none"
+                lines.append(f"        [{cat}]  findings={has}")
+            logger.info(
+                "Step %d: Investigation (parallel: %s)",
+                step_idx + 1,
+                ", ".join(categories),
             )
-        elif step == "closure":
-            detail = (
-                f'  satisfied={"yes" if state.get("satisfaction_verified") else "no"}'
-                f'  follow_up={"yes" if state.get("follow_up_required") else "no"}'
-            )
+            step_idx += 1
+        else:
+            label = NODE_LABELS.get(entry, entry)
+            if step_idx > 0:
+                lines.append("      |")
+                lines.append("      v")
 
-        lines.append(f"{prefix} {label}{detail}")
-        logger.info("Step %d: %s%s", i + 1, label, detail)
+            detail = ""
+            if entry == "intake":
+                detail = f'  categories={state.get("categories", [])}'
+            elif entry == "validation":
+                results = state.get("validation_results", {})
+                summaries = [f"{c}={r['status']}" for c, r in results.items()]
+                detail = f"  [{', '.join(summaries)}]"
+            elif entry == "resolution":
+                detail = (
+                    f'  effectiveness={state.get("effectiveness_rating", "")}'
+                    f'  escalation={"yes" if state.get("requires_escalation") else "no"}'
+                )
+            elif entry == "closure":
+                detail = (
+                    f'  satisfied={"yes" if state.get("satisfaction_verified") else "no"}'
+                    f'  follow_up={"yes" if state.get("follow_up_required") else "no"}'
+                )
+
+            lines.append(f"  --> {label}{detail}")
+            logger.info("Step %d: %s%s", step_idx + 1, label, detail)
+            step_idx += 1
 
     lines.append("")
     lines.append(f"  Result: {status_icon} {state.get('status', 'unknown')}")
@@ -96,13 +124,12 @@ def run_complaint(text: str) -> ComplaintState:
     initial_state: ComplaintState = {
         "complaint": text,
         "context": [],
-        "category": "",
+        "categories": [],
         "resolution": "",
         "workflow_path": [],
         "status": "new",
-        "validation_status": "",
-        "validation_message": "",
-        "investigation_findings": "",
+        "validation_results": {},
+        "investigation_findings": {},
         "effectiveness_rating": "",
         "requires_escalation": False,
         "closure_log": "",

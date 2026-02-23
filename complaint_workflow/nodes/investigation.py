@@ -1,24 +1,15 @@
 from langchain_core.messages import HumanMessage
 
-from complaint_workflow.state import ComplaintState
+from complaint_workflow.state import CategoryInvestigationState
 from complaint_workflow.llm import llm
 
 
-def investigation_node(state: ComplaintState) -> ComplaintState:
-    """Step 3: Investigate - Gather evidence based on category-specific protocols"""
-    print("\n[INVESTIGATION] Starting investigation...")
-
-    if state.get("validation_status") != "valid":
-        print("[INVESTIGATION] Cannot proceed - complaint has not passed validation")
-        return {
-            **state,
-            "investigation_findings": "",
-            "workflow_path": state.get("workflow_path", []) + ["investigation_blocked"],
-            "status": "investigation_blocked",
-        }
-
+def investigate_category_node(state: CategoryInvestigationState) -> dict:
+    """Investigate a single category in parallel. Receives minimal state via Send."""
     complaint = state["complaint"]
     category = state["category"]
+
+    print(f"\n[INVESTIGATION:{category.upper()}] Starting investigation...")
 
     investigation_prompt = f"""You are investigating a validated Downside Up complaint categorized as "{category}".
 
@@ -45,11 +36,9 @@ CONCLUSION:
     response = llm.invoke([HumanMessage(content=investigation_prompt)])
     findings = response.content.strip()
 
-    print("[INVESTIGATION] Investigation complete")
+    print(f"[INVESTIGATION:{category.upper()}] Investigation complete")
 
     return {
-        **state,
-        "investigation_findings": findings,
-        "workflow_path": state.get("workflow_path", []) + ["investigation"],
-        "status": "investigated",
+        "investigation_findings": {category: findings},
+        "workflow_path": [f"investigation:{category}"],
     }

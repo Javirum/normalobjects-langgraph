@@ -4,36 +4,40 @@ from complaint_workflow.state import ComplaintState
 from complaint_workflow.llm import llm
 
 
-def resolution_node(state: ComplaintState) -> ComplaintState:
-    """Step 4: Resolution - Propose a resolution based on investigation findings"""
+def resolution_node(state: ComplaintState) -> dict:
+    """Step 4: Resolution - Propose a resolution based on all investigation findings"""
     print("\n[RESOLUTION] Generating resolution...")
 
-    if not state.get("investigation_findings"):
+    findings = state.get("investigation_findings", {})
+    if not findings:
         print("[RESOLUTION] Cannot proceed - no documented investigation results")
         return {
-            **state,
             "resolution": "",
             "effectiveness_rating": "",
             "requires_escalation": False,
-            "workflow_path": state.get("workflow_path", []) + ["resolution_blocked"],
+            "workflow_path": ["resolution_blocked"],
             "status": "resolution_blocked",
         }
 
     complaint = state["complaint"]
-    category = state["category"]
-    findings = state["investigation_findings"]
+    categories = list(findings.keys())
+    categories_label = ", ".join(categories)
 
-    resolution_prompt = f"""You are resolving a Downside Up complaint categorized as "{category}".
+    all_findings = "\n\n".join(
+        f"--- {cat.upper()} INVESTIGATION ---\n{text}" for cat, text in findings.items()
+    )
 
-Investigation findings:
-{findings}
+    resolution_prompt = f"""You are resolving a Downside Up complaint that spans these categories: {categories_label}.
+
+Investigation findings across all categories:
+{all_findings}
 
 Original complaint: {complaint}
 
 Generate a resolution following these rules:
-1. The resolution must be specific to the "{category}" complaint type.
+1. The resolution must address ALL investigated categories ({categories_label}).
 2. Reference established Downside Up procedures or protocols (e.g., "Per Downside Up Protocol DU-XXX...").
-3. If the category is "environmental" or "monster", determine whether this requires escalation to a specialized team (Hawkins Environmental Response Unit or Creature Containment Division). Set ESCALATION to YES or NO.
+3. If any category is "environmental" or "monster", determine whether this requires escalation to a specialized team (Hawkins Environmental Response Unit or Creature Containment Division). Set ESCALATION to YES or NO.
 4. Include a predicted effectiveness rating: HIGH, MEDIUM, or LOW based on the evidence strength and resolution fit.
 
 Format your response EXACTLY as:
@@ -59,23 +63,22 @@ EFFECTIVENESS: [HIGH, MEDIUM, or LOW]"""
 
     # Parse escalation flag
     requires_escalation = False
-    if category in ("environmental", "monster"):
+    escalation_categories = {"environmental", "monster"}
+    if escalation_categories & set(categories):
         for line in result.split("\n"):
             if line.strip().upper().startswith("ESCALATION:"):
                 requires_escalation = "YES" in line.upper()
                 break
 
-    resolution_text = result
-
+    print(f"[RESOLUTION] Categories addressed: {categories_label}")
     print(f"[RESOLUTION] Effectiveness: {effectiveness}")
     if requires_escalation:
-        print(f"[RESOLUTION] Escalation required for {category} complaint")
+        print(f"[RESOLUTION] Escalation required")
 
     return {
-        **state,
-        "resolution": resolution_text,
+        "resolution": result,
         "effectiveness_rating": effectiveness,
         "requires_escalation": requires_escalation,
-        "workflow_path": state.get("workflow_path", []) + ["resolution"],
+        "workflow_path": ["resolution"],
         "status": "escalated_resolution" if requires_escalation else "resolved",
     }
