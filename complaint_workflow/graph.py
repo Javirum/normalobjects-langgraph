@@ -36,21 +36,31 @@ def fan_out_investigations(state: ComplaintState):
     ]
 
 
-workflow = StateGraph(ComplaintState)
+def build_workflow() -> StateGraph:
+    """Build the workflow StateGraph (not yet compiled)."""
+    workflow = StateGraph(ComplaintState)
 
-workflow.add_node("intake", intake_node)
-workflow.add_node("validate", validation_node)
-workflow.add_node("investigate_category", investigate_category_node)
-workflow.add_node("resolve", resolution_node)
-workflow.add_node("close", closure_node)
+    workflow.add_node("intake", intake_node)
+    workflow.add_node("validate", validation_node)
+    workflow.add_node("investigate_category", investigate_category_node)
+    workflow.add_node("resolve", resolution_node)
+    workflow.add_node("close", closure_node)
 
-workflow.add_edge(START, "intake")
-workflow.add_edge("intake", "validate")
-workflow.add_conditional_edges(
-    "validate", fan_out_investigations, ["investigate_category", "close"]
-)
-workflow.add_edge("investigate_category", "resolve")
-workflow.add_edge("resolve", "close")
-workflow.add_edge("close", END)
+    workflow.add_edge(START, "intake")
+    workflow.add_edge("intake", "validate")
+    workflow.add_conditional_edges(
+        "validate", fan_out_investigations, ["investigate_category", "close"]
+    )
+    workflow.add_edge("investigate_category", "resolve")
+    workflow.add_edge("resolve", "close")
+    workflow.add_edge("close", END)
 
-app = workflow.compile()
+    return workflow
+
+
+def compile_graph(checkpointer=None):
+    """Compile the workflow with an optional checkpointer."""
+    return build_workflow().compile(checkpointer=checkpointer)
+
+
+app = compile_graph()

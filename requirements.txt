@@ -1,3 +1,7 @@
 langgraph
 langchain-core
 langchain-openai
+fastapi
+uvicorn
+sqlalchemy
+python-dotenv
